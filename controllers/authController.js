@@ -1,14 +1,13 @@
 const User = require("./../models/user");
-const dotenv=require("dotenv").config()
+const dotenv = require("dotenv").config();
 const nodemailer = require("nodemailer");
 const jwt = require("jsonwebtoken");
 const twilio = require("twilio");
 const OTP = require("../models/otp");
-const crypto=require('crypto')
-const ACCOUNT_SID = process.env.ACCOUNT_SID
+const crypto = require("crypto");
+const ACCOUNT_SID = process.env.ACCOUNT_SID;
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
-const SECRET_KEY = process.env.SECRET_KEY
-const bcrypt=require('bcrypt')
+const SECRET_KEY = process.env.SECRET_KEY;
 
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 function generateOTP() {
@@ -18,7 +17,7 @@ const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.email,
-    pass:process.env.emailPass ,
+    pass: process.env.emailPass,
   },
 });
 async function sendOTPEmail(email, otp) {
@@ -39,32 +38,34 @@ async function sendOTPSMS(mobile, otp) {
   });
 }
 const hashPassword = (password) => {
-
-  const hash = crypto.createHmac('sha256', SECRET_KEY)
-                     .update(String(password))
-                     .digest('hex');
+  const hash = crypto
+    .createHmac("sha256", SECRET_KEY)
+    .update(String(password))
+    .digest("hex");
   return hash;
 };
 exports.signin = async (req, res) => {
   const { email, password } = req.body;
-  
-  const user = await User.findOne({ company_email:email });
+
+  const user = await User.findOne({ company_email: email });
   if (!user) {
-   return  res.status(404).json({ error: "User not found" });
+    return res.status(404).json({ error: "User not found" });
   }
-  const hashedPassword =await  hashPassword(password);
+  const hashedPassword = await hashPassword(password);
 
   if (user.hashedPassword === hashedPassword) {
     const token = jwt.sign({ email }, SECRET_KEY);
-    return res.status(200).json({ok:true, token: token });
+    return res.status(200).json({ ok: true, token: token });
   }
   return res.status(401).json({ error: "Invalid user" });
 };
 exports.signup = async (req, res) => {
-
   const { name, mobile, email, company, employees, password } = req.body;
   const hashedPassword = await hashPassword(password);
-  
+  const user = await User.findOne({ company_email: email });
+  if (!user.emailVerified) {
+    await User.deleteOne({ company_email: email });
+  }
   const newUser = new User({
     name,
     company_name: company,
@@ -98,9 +99,14 @@ exports.signup = async (req, res) => {
     const emailResult = results[0];
     const mobileResult = results[1];
 
-    if (emailResult.status === "rejected" && mobileResult.status === "rejected") {
+    if (
+      emailResult.status === "rejected" &&
+      mobileResult.status === "rejected"
+    ) {
       await User.deleteOne({ company_email: newUser.company_email });
-      return res.status(500).json({ error: "Unable to send OTP to email and mobile." });
+      return res
+        .status(500)
+        .json({ error: "Unable to send OTP to email and mobile." });
     } else if (emailResult.status === "rejected") {
       await User.deleteOne({ company_email: newUser.company_email });
       return res.status(500).json({ error: "Unable to send OTP to email." });
@@ -112,11 +118,9 @@ exports.signup = async (req, res) => {
     const token = jwt.sign({ email: newUser.company_email }, SECRET_KEY);
     return res.status(200).json({ ok: true, token });
   } catch (err) {
-  
     return res.status(400).json({ error: err.message });
   }
 };
-
 
 exports.verifyOTP = async (req, res) => {
   let { email, mobile, otp, token } = req.body;
@@ -126,7 +130,7 @@ exports.verifyOTP = async (req, res) => {
 
   try {
     if (mobile) {
-      const doc = await OTP.findOne({ mobile });
+      const doc = await OTP.findOne({ mobile }, { sort: { createdAt: -1 } });
       const hashedOTP = await hashPassword(otp); // Hashing the received OTP for comparison
 
       if (doc && doc.mobileOTP === hashedOTP) {
@@ -134,14 +138,14 @@ exports.verifyOTP = async (req, res) => {
         const user = await User.findOne({ mobile });
 
         if (user && user.mobileVerified && user.emailVerified) {
-          await OTP.deleteOne({ mobile });
+          await OTP.deleteMany({ mobile });
         }
 
         return res.status(200).json({ ok: true });
       }
       return res.status(401).json({ error: "Invalid OTP" });
     } else {
-      const doc = await OTP.findOne({ email });
+      const doc = await OTP.findOne({ email }, { sort: { createdAt: -1 } });
       const hashedOTP = await hashPassword(String(otp)); // Hashing the received OTP for comparison
 
       if (doc && doc.emailOTP === hashedOTP) {
@@ -149,7 +153,7 @@ exports.verifyOTP = async (req, res) => {
         const user = await User.findOne({ email });
 
         if (user && user.mobileVerified && user.emailVerified) {
-          await OTP.deleteOne({ email });
+          await OTP.deleteMany({ email });
         }
 
         return res.status(200).json({ ok: true });
@@ -157,15 +161,20 @@ exports.verifyOTP = async (req, res) => {
       return res.status(401).json({ error: "Invalid OTP" });
     }
   } catch (error) {
-
     return res.status(500).json({ error: "Server error" });
   }
 };
-
-
-const verifyToken = (token, secretKey, res) => {
+const verifyToken = async (token, secretKey, res) => {
   try {
     const decoded = jwt.verify(token, secretKey);
+    const { email } = decoded;
+    const user = await User.findOne({ company_email: email });
+    
+    if (!user?.emailVerified) {
+      await user.deleteOne({ company_email: email });
+      return null;
+    }
+    
     return decoded;
   } catch (error) {
     if (error.name === "TokenExpiredError") {
@@ -179,25 +188,17 @@ const verifyToken = (token, secretKey, res) => {
 
 exports.checkAuth = async (req, res) => {
   const token = req.headers["authorization"]?.split(" ")[1];
-  
-  
+
   const user = verifyToken(token, SECRET_KEY, res);
-
-  if (!user) return; 
-
+  if (!user) return;
   try {
     const email = user.email;
-    
-  
     const foundUser = await User.findOne({ company_email: email });
-    
     if (!foundUser) {
       return res.status(404).json({ ok: false, message: "User not found" });
     }
-    
     return res.status(200).json({ ok: true, user: foundUser });
   } catch (err) {
-  
     return res.status(500).json({ message: "Server error" });
   }
 };
