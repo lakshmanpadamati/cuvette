@@ -63,7 +63,7 @@ exports.signup = async (req, res) => {
   const { name, mobile, email, company, employees, password } = req.body;
   const hashedPassword = await hashPassword(password);
   const user = await User.findOne({ company_email: email });
-  if (!user.emailVerified) {
+  if (user && !user.emailVerified) {
     await User.deleteOne({ company_email: email });
   }
   const newUser = new User({
