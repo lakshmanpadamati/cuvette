@@ -100,7 +100,7 @@ exports.signup = async (req, res) => {
     const mobileResult = results[1];
 
     if (
-      emailResult.status === "rejected" &&
+      emailResult.status === "rejected" ||
       mobileResult.status === "rejected"
     ) {
       await User.deleteOne({ company_email: newUser.company_email });
