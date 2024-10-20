@@ -90,7 +90,7 @@ exports.signup = async (req, res) => {
       mobileOTP: hashedMobileOTP,
     });
 
-    await newOTPS.save();
+   
     const results = await Promise.allSettled([
       sendOTPEmail(user.company_email, emailOTP),
       sendOTPSMS("+91" + user.mobile, mobileOTP),
@@ -114,7 +114,7 @@ exports.signup = async (req, res) => {
       await User.deleteOne({ company_email: newUser.company_email });
       return res.status(500).json({ error: "Unable to send OTP to mobile." });
     }
-
+ await newOTPS.save();
     const token = jwt.sign({ email: newUser.company_email }, SECRET_KEY);
     return res.status(200).json({ ok: true, token });
   } catch (err) {
