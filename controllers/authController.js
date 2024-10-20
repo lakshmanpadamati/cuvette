@@ -169,12 +169,8 @@ const verifyToken = async (token, secretKey, res) => {
     const decoded = jwt.verify(token, secretKey);
     const { email } = decoded;
     const user = await User.findOne({ company_email: email });
-    
-    if (!user?.emailVerified) {
-      await user.deleteOne({ company_email: email });
-      return null;
-    }
-    
+
+
     return decoded;
   } catch (error) {
     if (error.name === "TokenExpiredError") {
@@ -182,21 +178,27 @@ const verifyToken = async (token, secretKey, res) => {
     } else {
       res.status(401).json({ message: "Invalid token" });
     }
-    return null;
+    return null; // Early return to prevent further code execution.
   }
 };
+
 
 exports.checkAuth = async (req, res) => {
   const token = req.headers["authorization"]?.split(" ")[1];
 
-  const user = verifyToken(token, SECRET_KEY, res);
-  if (!user) return;
+  const user = await verifyToken(token, SECRET_KEY, res);
+  if (!user) {
+    return;
+  }
+
+  const foundUser = await User.findOne({ company_email: user.email });
+
+  if (!foundUser || !foundUser.emailVerified) {
+    await User.deleteOne({ company_email: user.email });
+    return res.status(404).json({ ok: false, message: "User not found or email not verified" });
+  }
+
   try {
-    const email = user.email;
-    const foundUser = await User.findOne({ company_email: email });
-    if (!foundUser) {
-      return res.status(404).json({ ok: false, message: "User not found" });
-    }
     return res.status(200).json({ ok: true, user: foundUser });
   } catch (err) {
     return res.status(500).json({ message: "Server error" });
