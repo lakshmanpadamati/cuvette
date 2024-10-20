@@ -90,7 +90,7 @@ exports.signup = async (req, res) => {
       mobileOTP: hashedMobileOTP,
     });
 
-   
+    await newOTPS.save();
     const results = await Promise.allSettled([
       sendOTPEmail(user.company_email, emailOTP),
       sendOTPSMS("+91" + user.mobile, mobileOTP),
@@ -103,6 +103,8 @@ exports.signup = async (req, res) => {
       emailResult.status === "rejected" ||
       mobileResult.status === "rejected"
     ) {
+      await OTP.deleteOne({email:newUser.company_email})
+      
       await User.deleteOne({ company_email: newUser.company_email });
       return res
         .status(500)
@@ -114,11 +116,11 @@ exports.signup = async (req, res) => {
       await User.deleteOne({ company_email: newUser.company_email });
       return res.status(500).json({ error: "Unable to send OTP to mobile." });
     }
- await newOTPS.save();
+
     const token = jwt.sign({ email: newUser.company_email }, SECRET_KEY);
     return res.status(200).json({ ok: true, token });
   } catch (err) {
-    return res.status(400).json({ error: err.message });
+    return res.status(400).json({ error: "already have account"});
   }
 };
 
@@ -129,8 +131,10 @@ exports.verifyOTP = async (req, res) => {
   if (!decodedToken) return; // If token is invalid, exit the function.
 
   try {
+    let doc;
     if (mobile) {
-      const doc = await OTP.findOne({ mobile }, { sort: { createdAt: -1 } });
+      // Find the latest OTP document for mobile
+      doc = await OTP.findOne({ mobile }).sort({ createdAt: -1 });
       const hashedOTP = await hashPassword(otp); // Hashing the received OTP for comparison
 
       if (doc && doc.mobileOTP === hashedOTP) {
@@ -145,8 +149,9 @@ exports.verifyOTP = async (req, res) => {
       }
       return res.status(401).json({ error: "Invalid OTP" });
     } else {
-      const doc = await OTP.findOne({ email }, { sort: { createdAt: -1 } });
-      const hashedOTP = await hashPassword(String(otp)); // Hashing the received OTP for comparison
+    
+      doc = await OTP.findOne({ email }).sort({ createdAt: -1 });
+      const hashedOTP = await hashPassword(String(otp)); 
 
       if (doc && doc.emailOTP === hashedOTP) {
         await User.updateOne({ email }, { emailVerified: true });
@@ -164,6 +169,7 @@ exports.verifyOTP = async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 };
+
 const verifyToken = async (token, secretKey, res) => {
   try {
     const decoded = jwt.verify(token, secretKey);
